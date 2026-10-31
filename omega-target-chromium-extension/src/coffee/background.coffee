@@ -249,6 +249,7 @@ zeroBackground = (zeroStorage, opts) ->
   options._actionForUrl = actionForUrl
 
   options.initWithOptions(null, startupCheck)
+  globalThis.ZeroOmegaManaged?.attach(options, state, Log)
 
   options.externalApi = new OmegaTargetCurrent.ExternalApi(options)
   options.externalApi.listen()

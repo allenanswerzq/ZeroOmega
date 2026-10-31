@@ -15,6 +15,7 @@ import "./js/omega_pac.min.js"
 import "./js/omega_target.min.js"
 import "./js/omega_target_chromium_extension.min.js"
 import "./img/icons/draw_omega.js"
+import "./managed-storage.js"
 import "./js/background.js" // zeroBackground
 
 /**

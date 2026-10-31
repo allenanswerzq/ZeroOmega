@@ -31,6 +31,7 @@
     "omega-target": "./omega_target_shim.js"
   },
   "scripts": {
-    "dev": "npm link omega-target && npm link omega-web && npm link omega-pac"
+    "dev": "npm link omega-target && npm link omega-web && npm link omega-pac",
+    "test:managed": "node test/managed-storage.test.js"
   }
 }
