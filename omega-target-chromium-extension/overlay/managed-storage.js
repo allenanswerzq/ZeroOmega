@@ -34,6 +34,10 @@ function parseManagedSettings(settingsJson) {
     Array.isArray(settings.quickSwitchProfiles),
     "quickSwitchProfiles must be an array",
   );
+  assert(
+    typeof settings.quickSwitchEnabled === "boolean",
+    "quickSwitchEnabled must be a boolean",
+  );
 
   const profiles = {};
   for (const [name, profile] of Object.entries(settings.profiles)) {
@@ -94,7 +98,7 @@ function parseManagedSettings(settingsJson) {
   return {
     changes: {
       ...profiles,
-      "-enableQuickSwitch": quickSwitchProfiles.length > 1,
+      "-enableQuickSwitch": settings.quickSwitchEnabled,
       "-quickSwitchProfiles": quickSwitchProfiles,
       "-startupProfileName": settings.startupProfile,
     },

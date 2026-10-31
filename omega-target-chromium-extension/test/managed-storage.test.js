@@ -30,6 +30,7 @@ const { dismissOnboarding, parseManagedSettings, sha256Hex } =
 const json = JSON.stringify({
   schemaVersion: 1,
   startupProfile: "Automatic (TUN)",
+  quickSwitchEnabled: false,
   quickSwitchProfiles: ["Automatic (TUN)", "Proxy"],
   profiles: {
     "Automatic (TUN)": { type: "direct", color: "#55ccbb" },
@@ -43,7 +44,7 @@ assert.deepEqual(
   JSON.parse(JSON.stringify(parsed.changes["+Proxy"].fallbackProxy)),
   { scheme: "socks5", host: "127.0.0.1", port: 4080 },
 );
-assert.equal(parsed.changes["-enableQuickSwitch"], true);
+assert.equal(parsed.changes["-enableQuickSwitch"], false);
 assert.deepEqual(
   JSON.parse(JSON.stringify(parsed.profileKeys)),
   ["+Automatic (TUN)", "+Proxy"],
