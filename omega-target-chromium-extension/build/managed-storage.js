@@ -121,6 +121,16 @@ function managedStorageGet(keys) {
   });
 }
 
+async function dismissOnboarding(state) {
+  const policy = await managedStorageGet(MANAGED_POLICY_KEYS);
+  if (!policy.settingsJson && !policy.settingsSha256) return false;
+  await state.set({
+    firstRun: "",
+    "web.switchGuide": "",
+  });
+  return true;
+}
+
 function sameValue(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
@@ -190,6 +200,9 @@ function attach(options, state, log = console) {
     return reconcileRunning;
   };
 
+  dismissOnboarding(state).catch((error) =>
+    log.error("Managed ZeroOmega onboarding:", error),
+  );
   options.ready.then(reconcile);
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "managed") {
@@ -210,6 +223,7 @@ function attach(options, state, log = console) {
 
 globalThis.ZeroOmegaManaged = Object.freeze({
   attach,
+  dismissOnboarding,
   parseManagedSettings,
   sha256Hex,
 });

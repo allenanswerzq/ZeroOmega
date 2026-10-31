@@ -6,11 +6,27 @@ const source = fs.readFileSync(
   new URL("../overlay/managed-storage.js", `file://${__filename}`),
   "utf8",
 );
-const context = { console, crypto: globalThis.crypto, TextEncoder };
+let managedPolicy = {};
+const context = {
+  console,
+  crypto: globalThis.crypto,
+  TextEncoder,
+  chrome: {
+    runtime: { lastError: null },
+    storage: {
+      managed: {
+        get(_keys, callback) {
+          callback(managedPolicy);
+        },
+      },
+    },
+  },
+};
 context.globalThis = context;
 vm.runInNewContext(source, context);
 
-const { parseManagedSettings, sha256Hex } = context.ZeroOmegaManaged;
+const { dismissOnboarding, parseManagedSettings, sha256Hex } =
+  context.ZeroOmegaManaged;
 const json = JSON.stringify({
   schemaVersion: 1,
   startupProfile: "Automatic (TUN)",
@@ -41,6 +57,22 @@ assert.throws(
 async function main() {
   const digest = await sha256Hex("hello");
   assert.equal(digest, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+
+  const stateUpdates = [];
+  const state = {
+    set(update) {
+      stateUpdates.push(update);
+      return Promise.resolve();
+    },
+  };
+  assert.equal(await dismissOnboarding(state), false);
+  assert.deepEqual(stateUpdates, []);
+
+  managedPolicy = { settingsJson: json, settingsSha256: await sha256Hex(json) };
+  assert.equal(await dismissOnboarding(state), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(stateUpdates)), [
+    { firstRun: "", "web.switchGuide": "" },
+  ]);
 }
 
 main().catch((error) => {

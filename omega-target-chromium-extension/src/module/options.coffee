@@ -329,7 +329,16 @@ class ChromeOptions extends OmegaTarget.Options
 
   onFirstRun: (reason) ->
     console.log('first run ....')
-    chrome.tabs.create url: chrome.runtime.getURL('options.html')
+    openOptions = ->
+      chrome.tabs.create url: chrome.runtime.getURL('options.html')
+    managed = globalThis.ZeroOmegaManaged
+    return openOptions() unless managed?.dismissOnboarding?
+    managed.dismissOnboarding(@_state).then((dismissed) ->
+      openOptions() unless dismissed
+    ).catch((error) ->
+      Log.error('Managed ZeroOmega onboarding:', error)
+      openOptions()
+    )
 
   getPageInfo: ({tabId, url}) ->
     errorCount = @_requestMonitor?.tabInfo[tabId]?.errorCount
