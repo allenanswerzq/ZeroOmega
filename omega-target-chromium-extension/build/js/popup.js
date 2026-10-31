@@ -11,6 +11,9 @@
   module.filter('dispName', function(omegaTarget) {
     return function(name) {
       if (typeof name === 'object') {
+        if (name.displayName) {
+          return name.displayName;
+        }
         name = name.name;
       }
       return omegaTarget.getMessage('profile_' + name) || name;
@@ -355,7 +358,9 @@
         if (!__hasProp.call(availableProfiles, key)) continue;
         profile = availableProfiles[key];
         if (profile.builtin) {
-          $scope.builtinProfiles.push(profile);
+          if (!profile.hidden) {
+            $scope.builtinProfiles.push(profile);
+          }
         } else if (profile.name.charCodeAt(0) !== charCodeUnderscore) {
           $scope.customProfiles.push(profile);
         }

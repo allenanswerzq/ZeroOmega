@@ -25,29 +25,90 @@ const context = {
 context.globalThis = context;
 vm.runInNewContext(source, context);
 
-const { dismissOnboarding, parseManagedSettings, sha256Hex } =
+const { buildManagedChanges, dismissOnboarding, parseManagedSettings, sha256Hex } =
   context.ZeroOmegaManaged;
 const json = JSON.stringify({
   schemaVersion: 1,
-  startupProfile: "Automatic (TUN)",
+  startupProfile: "auto switch",
   quickSwitchEnabled: false,
-  quickSwitchProfiles: ["Automatic (TUN)", "Proxy"],
+  exclusiveProfiles: true,
+  hideBuiltinProfiles: true,
+  quickSwitchProfiles: ["dubai", "force-direct", "proxy", "auto switch"],
   profiles: {
-    "Automatic (TUN)": { type: "direct", color: "#55ccbb" },
-    Proxy: { type: "socks5", color: "#5577dd", host: "127.0.0.1", port: 4080 },
+    dubai: {
+      type: "socks5",
+      color: "#dd9955",
+      host: "127.0.0.1",
+      port: 5080,
+    },
+    "force-direct": {
+      type: "socks5",
+      displayName: "direct",
+      color: "#77bb66",
+      host: "127.0.0.1",
+      port: 6080,
+    },
+    proxy: {
+      type: "socks5",
+      color: "#5577dd",
+      host: "127.0.0.1",
+      port: 4080,
+    },
+    "auto switch": {
+      type: "switch",
+      color: "#55ccbb",
+      defaultProfile: "proxy",
+    },
   },
 });
 
 const parsed = parseManagedSettings(json);
-assert.equal(parsed.changes["+Automatic (TUN)"].defaultProfileName, "direct");
+assert.equal(parsed.changes["+force-direct"].displayName, "direct");
 assert.deepEqual(
-  JSON.parse(JSON.stringify(parsed.changes["+Proxy"].fallbackProxy)),
+  JSON.parse(JSON.stringify(parsed.changes["+proxy"].fallbackProxy)),
   { scheme: "socks5", host: "127.0.0.1", port: 4080 },
 );
+assert.equal(parsed.changes["+auto switch"].defaultProfileName, "proxy");
 assert.equal(parsed.changes["-enableQuickSwitch"], false);
+assert.equal(parsed.changes["-hideBuiltinProfiles"], true);
+assert.equal(parsed.exclusiveProfiles, true);
 assert.deepEqual(
   JSON.parse(JSON.stringify(parsed.profileKeys)),
-  ["+Automatic (TUN)", "+Proxy"],
+  ["+dubai", "+force-direct", "+proxy", "+auto switch"],
+);
+assert.deepEqual(JSON.parse(JSON.stringify(parsed.mutableProfileKeys)), [
+  "+auto switch",
+]);
+
+const preservedRule = {
+  condition: { conditionType: "HostWildcardCondition", pattern: "*.example.com" },
+  profileName: "proxy",
+};
+const managedChanges = buildManagedChanges(
+  parsed,
+  { managedProfileKeys: parsed.profileKeys },
+  {
+    "+old profile": { name: "old profile", profileType: "FixedProfile" },
+    "+auto switch": {
+      ...parsed.changes["+auto switch"],
+      color: "#000000",
+      rules: [preservedRule],
+      defaultProfileName: "force-direct",
+    },
+  },
+);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(managedChanges, "+old profile"),
+  true,
+);
+assert.equal(managedChanges["+old profile"], undefined);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(managedChanges["+auto switch"].rules)),
+  [preservedRule],
+);
+assert.equal(
+  managedChanges["+auto switch"].defaultProfileName,
+  "force-direct",
 );
 
 assert.throws(

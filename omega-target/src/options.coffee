@@ -613,10 +613,12 @@ class Options
     OmegaPac.Profiles.each @_options, (key, p) =>
       profiles[key] =
         name: p.name
+        displayName: p.displayName
         profileType: p.profileType
         color: p.color
         desc: @printProfile(p)
         builtin: if p.builtin then true
+        hidden: if p.builtin and @_options['-hideBuiltinProfiles'] then true
       if p.profileType == 'VirtualProfile'
         profiles[key].defaultProfileName = p.defaultProfileName
         if not allReferenceSet?

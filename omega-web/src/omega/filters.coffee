@@ -25,5 +25,6 @@ angular.module('omega').filter 'tr', (omegaTarget) -> omegaTarget.getMessage
 angular.module('omega').filter 'dispName', (omegaTarget) ->
   (name) ->
     if typeof name == 'object'
+      return name.displayName if name.displayName
       name = name.name
     omegaTarget.getMessage('profile_' + name) || name

@@ -5,6 +5,7 @@ module.filter 'tr', (omegaTarget) -> omegaTarget.getMessage
 module.filter 'dispName', (omegaTarget) ->
   (name) ->
     if typeof name == 'object'
+      return name.displayName if name.displayName
       name = name.name
     omegaTarget.getMessage('profile_' + name) || name
 
@@ -254,7 +255,7 @@ module.controller 'PopupCtrl', ($scope, $window, $q, omegaTarget,
     $scope.customProfiles = []
     for own key, profile of availableProfiles
       if profile.builtin
-        $scope.builtinProfiles.push(profile)
+        $scope.builtinProfiles.push(profile) unless profile.hidden
       else if profile.name.charCodeAt(0) != charCodeUnderscore
         $scope.customProfiles.push(profile)
       if profile.validResultProfiles

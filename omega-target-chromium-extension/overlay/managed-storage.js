@@ -3,7 +3,7 @@ const MANAGED_STATE_DEFAULTS = {
   managedSettingsSha256: "",
   managedProfileKeys: [],
 };
-const PROFILE_TYPES = new Set(["direct", "socks5"]);
+const PROFILE_TYPES = new Set(["direct", "socks5", "switch"]);
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -38,8 +38,17 @@ function parseManagedSettings(settingsJson) {
     typeof settings.quickSwitchEnabled === "boolean",
     "quickSwitchEnabled must be a boolean",
   );
+  assert(
+    typeof settings.exclusiveProfiles === "boolean",
+    "exclusiveProfiles must be a boolean",
+  );
+  assert(
+    typeof settings.hideBuiltinProfiles === "boolean",
+    "hideBuiltinProfiles must be a boolean",
+  );
 
   const profiles = {};
+  const mutableProfileKeys = [];
   for (const [name, profile] of Object.entries(settings.profiles)) {
     assert(name && !name.startsWith("+"), "profile names must be plain names");
     assert(isPlainObject(profile), `${name} must be an object`);
@@ -48,15 +57,39 @@ function parseManagedSettings(settingsJson) {
       typeof profile.color === "string" && /^#[0-9a-f]{6}$/i.test(profile.color),
       `${name} has an invalid color`,
     );
+    if (profile.displayName !== undefined) {
+      assert(
+        typeof profile.displayName === "string" && profile.displayName,
+        `${name} has an invalid displayName`,
+      );
+    }
 
     if (profile.type === "direct") {
       profiles[`+${name}`] = {
         name,
+        displayName: profile.displayName || name,
         profileType: "SwitchProfile",
         color: profile.color,
         rules: [],
         defaultProfileName: "direct",
       };
+      continue;
+    }
+
+    if (profile.type === "switch") {
+      assert(
+        typeof profile.defaultProfile === "string" && profile.defaultProfile,
+        `${name} needs a defaultProfile`,
+      );
+      profiles[`+${name}`] = {
+        name,
+        displayName: profile.displayName || name,
+        profileType: "SwitchProfile",
+        color: profile.color,
+        rules: [],
+        defaultProfileName: profile.defaultProfile,
+      };
+      mutableProfileKeys.push(`+${name}`);
       continue;
     }
 
@@ -67,6 +100,7 @@ function parseManagedSettings(settingsJson) {
     );
     profiles[`+${name}`] = {
       name,
+      displayName: profile.displayName || name,
       profileType: "FixedProfile",
       color: profile.color,
       fallbackProxy: {
@@ -86,6 +120,13 @@ function parseManagedSettings(settingsJson) {
     Object.prototype.hasOwnProperty.call(profiles, `+${settings.startupProfile}`),
     "startupProfile does not exist",
   );
+  for (const key of mutableProfileKeys) {
+    const defaultProfile = profiles[key].defaultProfileName;
+    assert(
+      Object.prototype.hasOwnProperty.call(profiles, `+${defaultProfile}`),
+      `${profiles[key].name} defaultProfile does not exist`,
+    );
+  }
   const quickSwitchProfiles = settings.quickSwitchProfiles.map((name) => {
     assert(typeof name === "string" && name, "quick-switch names must be strings");
     assert(
@@ -99,10 +140,13 @@ function parseManagedSettings(settingsJson) {
     changes: {
       ...profiles,
       "-enableQuickSwitch": settings.quickSwitchEnabled,
+      "-hideBuiltinProfiles": settings.hideBuiltinProfiles,
       "-quickSwitchProfiles": quickSwitchProfiles,
       "-startupProfileName": settings.startupProfile,
     },
     profileKeys: Object.keys(profiles),
+    mutableProfileKeys,
+    exclusiveProfiles: settings.exclusiveProfiles,
     startupProfile: settings.startupProfile,
   };
 }
@@ -137,6 +181,45 @@ async function dismissOnboarding(state) {
 
 function sameValue(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function buildManagedChanges(managed, previous, current) {
+  const changes = {};
+  const previousProfileKeys = new Set(previous.managedProfileKeys || []);
+
+  for (const key of previous.managedProfileKeys || []) {
+    if (!managed.profileKeys.includes(key) && current[key] !== undefined) {
+      changes[key] = undefined;
+    }
+  }
+  if (managed.exclusiveProfiles) {
+    for (const key of Object.keys(current)) {
+      if (key.startsWith("+") && !managed.profileKeys.includes(key)) {
+        changes[key] = undefined;
+      }
+    }
+  }
+  for (const [key, value] of Object.entries(managed.changes)) {
+    let nextValue = value;
+    if (
+      managed.mutableProfileKeys.includes(key) &&
+      previousProfileKeys.has(key) &&
+      current[key]?.profileType === value.profileType
+    ) {
+      nextValue = {
+        ...current[key],
+        ...value,
+        rules: Array.isArray(current[key].rules) ? current[key].rules : [],
+        defaultProfileName: managed.profileKeys.includes(
+          `+${current[key].defaultProfileName}`,
+        )
+          ? current[key].defaultProfileName
+          : value.defaultProfileName,
+      };
+    }
+    if (!sameValue(current[key], nextValue)) changes[key] = nextValue;
+  }
+  return changes;
 }
 
 function attach(options, state, log = console) {
@@ -176,24 +259,16 @@ function attach(options, state, log = console) {
         activeProfileKeys = new Set(managed.profileKeys);
         const previous = await state.get(MANAGED_STATE_DEFAULTS);
         const current = options.getAll();
-        const changes = {};
-
-        for (const key of previous.managedProfileKeys || []) {
-          if (!managed.profileKeys.includes(key) && current[key] !== undefined) {
-            changes[key] = undefined;
-          }
-        }
-        for (const [key, value] of Object.entries(managed.changes)) {
-          if (!sameValue(current[key], value)) changes[key] = value;
-        }
+        const changes = buildManagedChanges(managed, previous, current);
 
         if (Object.keys(changes).length) await options._setOptions(changes);
-        const firstManagedImport = !previous.managedSettingsSha256;
+        const policyChanged =
+          previous.managedSettingsSha256 !== policy.settingsSha256;
         await state.set({
           managedSettingsSha256: policy.settingsSha256,
           managedProfileKeys: managed.profileKeys,
         });
-        if (firstManagedImport) await options.applyProfile(managed.startupProfile);
+        if (policyChanged) await options.applyProfile(managed.startupProfile);
       } while (reconcileAgain);
     })()
       .catch((error) => log.error("Managed ZeroOmega settings:", error))
@@ -227,6 +302,7 @@ function attach(options, state, log = console) {
 
 globalThis.ZeroOmegaManaged = Object.freeze({
   attach,
+  buildManagedChanges,
   dismissOnboarding,
   parseManagedSettings,
   sha256Hex,

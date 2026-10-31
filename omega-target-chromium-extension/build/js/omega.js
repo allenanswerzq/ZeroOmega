@@ -2187,6 +2187,9 @@
   angular.module('omega').filter('dispName', function(omegaTarget) {
     return function(name) {
       if (typeof name === 'object') {
+        if (name.displayName) {
+          return name.displayName;
+        }
         name = name.name;
       }
       return omegaTarget.getMessage('profile_' + name) || name;
