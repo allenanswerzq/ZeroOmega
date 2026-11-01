@@ -174,7 +174,7 @@ async function dismissOnboarding(state) {
   if (!policy.settingsJson && !policy.settingsSha256) return false;
   await state.set({
     firstRun: "",
-    "web.switchGuide": "",
+    "web.switchGuide": "shown",
   });
   return true;
 }

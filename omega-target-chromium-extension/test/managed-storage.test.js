@@ -133,7 +133,7 @@ async function main() {
   managedPolicy = { settingsJson: json, settingsSha256: await sha256Hex(json) };
   assert.equal(await dismissOnboarding(state), true);
   assert.deepEqual(JSON.parse(JSON.stringify(stateUpdates)), [
-    { firstRun: "", "web.switchGuide": "" },
+    { firstRun: "", "web.switchGuide": "shown" },
   ]);
 }
 
