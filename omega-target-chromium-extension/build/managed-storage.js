@@ -3,7 +3,8 @@ const MANAGED_STATE_DEFAULTS = {
   managedSettingsSha256: "",
   managedProfileKeys: [],
 };
-const PROFILE_TYPES = new Set(["direct", "socks5", "switch"]);
+const PROFILE_TYPES = new Set(["socks5", "switch"]);
+const BUILTIN_PROFILES = new Set(["direct", "system"]);
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -11,6 +12,10 @@ function isPlainObject(value) {
 
 function assert(condition, message) {
   if (!condition) throw new Error(`Invalid managed settings: ${message}`);
+}
+
+function isKnownProfile(profileKeys, name) {
+  return BUILTIN_PROFILES.has(name) || profileKeys.includes(`+${name}`);
 }
 
 function parseManagedSettings(settingsJson) {
@@ -64,22 +69,11 @@ function parseManagedSettings(settingsJson) {
       );
     }
 
-    if (profile.type === "direct") {
-      profiles[`+${name}`] = {
-        name,
-        displayName: profile.displayName || name,
-        profileType: "SwitchProfile",
-        color: profile.color,
-        rules: [],
-        defaultProfileName: "direct",
-      };
-      continue;
-    }
-
     if (profile.type === "switch") {
       assert(
-        typeof profile.defaultProfile === "string" && profile.defaultProfile,
-        `${name} needs a defaultProfile`,
+        profile.defaultProfile === undefined ||
+          (typeof profile.defaultProfile === "string" && profile.defaultProfile),
+        `${name} has an invalid defaultProfile`,
       );
       profiles[`+${name}`] = {
         name,
@@ -87,7 +81,7 @@ function parseManagedSettings(settingsJson) {
         profileType: "SwitchProfile",
         color: profile.color,
         rules: [],
-        defaultProfileName: profile.defaultProfile,
+        defaultProfileName: profile.defaultProfile || "direct",
       };
       mutableProfileKeys.push(`+${name}`);
       continue;
@@ -120,10 +114,10 @@ function parseManagedSettings(settingsJson) {
     Object.prototype.hasOwnProperty.call(profiles, `+${settings.startupProfile}`),
     "startupProfile does not exist",
   );
+  const profileKeys = Object.keys(profiles);
   for (const key of mutableProfileKeys) {
-    const defaultProfile = profiles[key].defaultProfileName;
     assert(
-      Object.prototype.hasOwnProperty.call(profiles, `+${defaultProfile}`),
+      isKnownProfile(profileKeys, profiles[key].defaultProfileName),
       `${profiles[key].name} defaultProfile does not exist`,
     );
   }
@@ -144,7 +138,7 @@ function parseManagedSettings(settingsJson) {
       "-quickSwitchProfiles": quickSwitchProfiles,
       "-startupProfileName": settings.startupProfile,
     },
-    profileKeys: Object.keys(profiles),
+    profileKeys,
     mutableProfileKeys,
     exclusiveProfiles: settings.exclusiveProfiles,
     startupProfile: settings.startupProfile,
@@ -210,8 +204,9 @@ function buildManagedChanges(managed, previous, current) {
         ...current[key],
         ...value,
         rules: Array.isArray(current[key].rules) ? current[key].rules : [],
-        defaultProfileName: managed.profileKeys.includes(
-          `+${current[key].defaultProfileName}`,
+        defaultProfileName: isKnownProfile(
+          managed.profileKeys,
+          current[key].defaultProfileName,
         )
           ? current[key].defaultProfileName
           : value.defaultProfileName,

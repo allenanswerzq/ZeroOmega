@@ -116,6 +116,29 @@ assert.throws(
   /invalid port/,
 );
 
+const unseeded = parseManagedSettings(json.replace(',"defaultProfile":"proxy"', ""));
+assert.equal(unseeded.changes["+auto switch"].defaultProfileName, "direct");
+
+const builtinDefault = buildManagedChanges(
+  unseeded,
+  { managedProfileKeys: unseeded.profileKeys },
+  {
+    "+auto switch": {
+      ...unseeded.changes["+auto switch"],
+      defaultProfileName: "system",
+    },
+  },
+);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(builtinDefault, "+auto switch"),
+  false,
+);
+
+assert.throws(
+  () => parseManagedSettings(json.replace('"defaultProfile":"proxy"', '"defaultProfile":"gone"')),
+  /defaultProfile does not exist/,
+);
+
 async function main() {
   const digest = await sha256Hex("hello");
   assert.equal(digest, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
