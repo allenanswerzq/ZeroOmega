@@ -7,26 +7,40 @@ const source = fs.readFileSync(
   "utf8",
 );
 let managedPolicy = {};
+const messageListeners = [];
 const context = {
   console,
   crypto: globalThis.crypto,
   TextEncoder,
   chrome: {
-    runtime: { lastError: null },
+    runtime: {
+      id: "zeroomega",
+      lastError: null,
+      getURL: (path) => `chrome-extension://zeroomega/${path}`,
+      onMessage: { addListener: (listener) => messageListeners.push(listener) },
+    },
     storage: {
       managed: {
         get(_keys, callback) {
           callback(managedPolicy);
         },
       },
+      onChanged: { addListener() {} },
     },
   },
 };
 context.globalThis = context;
 vm.runInNewContext(source, context);
 
-const { buildManagedChanges, dismissOnboarding, parseManagedSettings, sha256Hex } =
-  context.ZeroOmegaManaged;
+const {
+  CHROME_PROFILE_MESSAGE,
+  attach,
+  buildManagedChanges,
+  dismissOnboarding,
+  parseManagedSettings,
+  sha256Hex,
+  startupProfileFor,
+} = context.ZeroOmegaManaged;
 const json = JSON.stringify({
   schemaVersion: 1,
   startupProfile: "auto switch",
@@ -60,6 +74,9 @@ const json = JSON.stringify({
       defaultProfile: "proxy",
     },
   },
+  chromeProfiles: {
+    "omarchy-china": { startupProfile: "force-direct" },
+  },
 });
 
 const parsed = parseManagedSettings(json);
@@ -72,6 +89,17 @@ assert.equal(parsed.changes["+auto switch"].defaultProfileName, "proxy");
 assert.equal(parsed.changes["-enableQuickSwitch"], false);
 assert.equal(parsed.changes["-hideBuiltinProfiles"], true);
 assert.equal(parsed.exclusiveProfiles, true);
+assert.equal(startupProfileFor(parsed, "omarchy-china"), "force-direct");
+assert.equal(startupProfileFor(parsed, ""), "auto switch");
+assert.equal(startupProfileFor(parsed, "Zhang"), "auto switch");
+assert.throws(
+  () => parseManagedSettings(json.replace('"startupProfile":"force-direct"', '"startupProfile":"gone"')),
+  /omarchy-china startupProfile does not exist/,
+);
+assert.throws(
+  () => parseManagedSettings(json.replace('"omarchy-china"', '"../china"')),
+  /Chrome profile name/,
+);
 assert.deepEqual(
   JSON.parse(JSON.stringify(parsed.profileKeys)),
   ["+dubai", "+force-direct", "+proxy", "+auto switch"],
@@ -158,6 +186,39 @@ async function main() {
   assert.deepEqual(JSON.parse(JSON.stringify(stateUpdates)), [
     { firstRun: "", "web.switchGuide": "shown" },
   ]);
+
+  // A named Chrome profile starts in its own managed profile; others do not.
+  const stored = {};
+  const applied = [];
+  const profileState = {
+    get: async (defaults) => ({ ...defaults, ...stored }),
+    set: async (update) => Object.assign(stored, update),
+  };
+  const options = {
+    ready: Promise.resolve(),
+    getAll: () => ({}),
+    _setOptions: async () => {},
+    applyProfile: async (name) => applied.push(name),
+  };
+  attach(options, profileState, { error: (...args) => assert.fail(args.join(" ")) });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(applied, ["auto switch"]);
+
+  const ask = (message, sender) =>
+    new Promise((resolve) => {
+      const listener = messageListeners.at(-1);
+      listener(message, sender, (reply) => resolve(JSON.parse(JSON.stringify(reply))));
+    });
+  const page = { id: "zeroomega", url: "chrome-extension://zeroomega/chrome-profile.html" };
+  const message = { type: CHROME_PROFILE_MESSAGE, chromeProfile: "omarchy-china" };
+  assert.deepEqual(await ask(message, page), { ok: true, startupProfile: "force-direct" });
+  assert.deepEqual(applied, ["auto switch", "force-direct"]);
+  // Naming it again changes nothing, and other senders are refused.
+  assert.deepEqual(await ask(message, page), { ok: true, startupProfile: "force-direct" });
+  assert.deepEqual(applied, ["auto switch", "force-direct"]);
+  const website = { id: "zeroomega", url: "https://example.com/" };
+  assert.equal((await ask(message, website)).ok, false);
+  assert.equal(stored.managedChromeProfile, "omarchy-china");
 }
 
 main().catch((error) => {

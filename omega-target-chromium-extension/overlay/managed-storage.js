@@ -2,9 +2,15 @@ const MANAGED_POLICY_KEYS = ["settingsJson", "settingsSha256"];
 const MANAGED_STATE_DEFAULTS = {
   managedSettingsSha256: "",
   managedProfileKeys: [],
+  managedChromeProfile: "",
+  managedStartupProfile: "",
 };
 const PROFILE_TYPES = new Set(["socks5", "switch"]);
 const BUILTIN_PROFILES = new Set(["direct", "system"]);
+// Chrome does not tell extensions which profile they run in, so a launcher
+// names it once through chrome-profile.html and the profile's state keeps it.
+const CHROME_PROFILE_MESSAGE = "zeroOmegaManagedChromeProfile";
+const CHROME_PROFILE_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._ -]*[A-Za-z0-9])?$/;
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -130,6 +136,27 @@ function parseManagedSettings(settingsJson) {
     return name;
   });
 
+  const chromeProfiles = {};
+  if (settings.chromeProfiles !== undefined) {
+    assert(
+      isPlainObject(settings.chromeProfiles),
+      "chromeProfiles must be an object",
+    );
+    for (const [chromeProfile, value] of Object.entries(settings.chromeProfiles)) {
+      assert(
+        CHROME_PROFILE_NAME.test(chromeProfile),
+        `Chrome profile name ${chromeProfile} is invalid`,
+      );
+      assert(isPlainObject(value), `Chrome profile ${chromeProfile} must be an object`);
+      assert(
+        typeof value.startupProfile === "string" &&
+          Object.prototype.hasOwnProperty.call(profiles, `+${value.startupProfile}`),
+        `Chrome profile ${chromeProfile} startupProfile does not exist`,
+      );
+      chromeProfiles[chromeProfile] = value.startupProfile;
+    }
+  }
+
   return {
     changes: {
       ...profiles,
@@ -142,7 +169,14 @@ function parseManagedSettings(settingsJson) {
     mutableProfileKeys,
     exclusiveProfiles: settings.exclusiveProfiles,
     startupProfile: settings.startupProfile,
+    chromeProfiles,
   };
+}
+
+function startupProfileFor(managed, chromeProfile) {
+  return Object.prototype.hasOwnProperty.call(managed.chromeProfiles, chromeProfile)
+    ? managed.chromeProfiles[chromeProfile]
+    : managed.startupProfile;
 }
 
 async function sha256Hex(value) {
@@ -253,17 +287,24 @@ function attach(options, state, log = console) {
         const managed = parseManagedSettings(policy.settingsJson);
         activeProfileKeys = new Set(managed.profileKeys);
         const previous = await state.get(MANAGED_STATE_DEFAULTS);
+        const startupProfile = startupProfileFor(
+          managed,
+          previous.managedChromeProfile,
+        );
+        managed.changes["-startupProfileName"] = startupProfile;
         const current = options.getAll();
         const changes = buildManagedChanges(managed, previous, current);
 
         if (Object.keys(changes).length) await options._setOptions(changes);
-        const policyChanged =
-          previous.managedSettingsSha256 !== policy.settingsSha256;
+        const startupChanged =
+          previous.managedSettingsSha256 !== policy.settingsSha256 ||
+          previous.managedStartupProfile !== startupProfile;
         await state.set({
           managedSettingsSha256: policy.settingsSha256,
           managedProfileKeys: managed.profileKeys,
+          managedStartupProfile: startupProfile,
         });
-        if (policyChanged) await options.applyProfile(managed.startupProfile);
+        if (startupChanged) await options.applyProfile(startupProfile);
       } while (reconcileAgain);
     })()
       .catch((error) => log.error("Managed ZeroOmega settings:", error))
@@ -277,6 +318,27 @@ function attach(options, state, log = console) {
   dismissOnboarding(state).catch((error) =>
     log.error("Managed ZeroOmega onboarding:", error),
   );
+  chrome.runtime?.onMessage?.addListener((message, sender, respond) => {
+    if (message?.type !== CHROME_PROFILE_MESSAGE) return false;
+    const fromThisExtension =
+      sender?.id === chrome.runtime.id &&
+      String(sender.url || "").startsWith(chrome.runtime.getURL(""));
+    const name = message.chromeProfile;
+    if (!fromThisExtension || typeof name !== "string" || !CHROME_PROFILE_NAME.test(name)) {
+      respond({ ok: false, error: "invalid Chrome profile request" });
+      return false;
+    }
+    state
+      .set({ managedChromeProfile: name })
+      .then(reconcile)
+      .then(() => state.get({ managedStartupProfile: "" }))
+      .then(
+        ({ managedStartupProfile }) =>
+          respond({ ok: true, startupProfile: managedStartupProfile }),
+        (error) => respond({ ok: false, error: String(error?.message || error) }),
+      );
+    return true;
+  });
   options.ready.then(reconcile);
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "managed") {
@@ -296,9 +358,11 @@ function attach(options, state, log = console) {
 }
 
 globalThis.ZeroOmegaManaged = Object.freeze({
+  CHROME_PROFILE_MESSAGE,
   attach,
   buildManagedChanges,
   dismissOnboarding,
   parseManagedSettings,
   sha256Hex,
+  startupProfileFor,
 });
