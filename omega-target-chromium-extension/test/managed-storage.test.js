@@ -8,6 +8,8 @@ const source = fs.readFileSync(
 );
 let managedPolicy = {};
 const messageListeners = [];
+const reloadedTabs = [];
+let openTabs = [];
 const context = {
   console,
   crypto: globalThis.crypto,
@@ -18,6 +20,10 @@ const context = {
       lastError: null,
       getURL: (path) => `chrome-extension://zeroomega/${path}`,
       onMessage: { addListener: (listener) => messageListeners.push(listener) },
+    },
+    tabs: {
+      query: async () => openTabs,
+      reload: async (id) => reloadedTabs.push(id),
     },
     storage: {
       managed: {
@@ -38,6 +44,7 @@ const {
   buildManagedChanges,
   dismissOnboarding,
   parseManagedSettings,
+  reloadLauncherTabs,
   sha256Hex,
   startupProfileFor,
 } = context.ZeroOmegaManaged;
@@ -219,6 +226,23 @@ async function main() {
   const website = { id: "zeroomega", url: "https://example.com/" };
   assert.equal((await ask(message, website)).ok, false);
   assert.equal(stored.managedChromeProfile, "omarchy-china");
+
+  // The first start reloads a launcher page that failed before installation,
+  // and only the first start does.
+  const fresh = {};
+  const freshState = {
+    get: async (defaults) => ({ ...defaults, ...fresh }),
+    set: async (update) => Object.assign(fresh, update),
+  };
+  openTabs = [
+    { id: 1, url: "https://example.com/" },
+    { id: 2, url: "chrome-extension://zeroomega/chrome-profile.html?name=omarchy-china" },
+  ];
+  reloadedTabs.length = 0;
+  assert.equal(await reloadLauncherTabs(freshState), 1);
+  assert.deepEqual(reloadedTabs, [2]);
+  assert.equal(await reloadLauncherTabs(freshState), 0);
+  assert.deepEqual(reloadedTabs, [2]);
 }
 
 main().catch((error) => {

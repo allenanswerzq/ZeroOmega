@@ -4,6 +4,7 @@ const MANAGED_STATE_DEFAULTS = {
   managedProfileKeys: [],
   managedChromeProfile: "",
   managedStartupProfile: "",
+  managedLauncherTabsChecked: false,
 };
 const PROFILE_TYPES = new Set(["socks5", "switch"]);
 const BUILTIN_PROFILES = new Set(["direct", "system"]);
@@ -251,6 +252,22 @@ function buildManagedChanges(managed, previous, current) {
   return changes;
 }
 
+// A new profile opens its launcher page before Chrome finishes installing this
+// extension, so the page fails to load. On its first start the extension
+// reloads such tabs once; they then load and name the profile.
+async function reloadLauncherTabs(state) {
+  const { managedLauncherTabsChecked } = await state.get({
+    managedLauncherTabsChecked: false,
+  });
+  if (managedLauncherTabsChecked || !chrome.tabs?.query) return 0;
+  const page = chrome.runtime.getURL("chrome-profile.html");
+  const tabs = await chrome.tabs.query({});
+  const launchers = tabs.filter((tab) => (tab.url || tab.pendingUrl || "").startsWith(page));
+  await Promise.all(launchers.map((tab) => chrome.tabs.reload(tab.id)));
+  await state.set({ managedLauncherTabsChecked: true });
+  return launchers.length;
+}
+
 function attach(options, state, log = console) {
   if (!chrome.storage?.managed) return;
 
@@ -340,6 +357,9 @@ function attach(options, state, log = console) {
     return true;
   });
   options.ready.then(reconcile);
+  reloadLauncherTabs(state).catch((error) =>
+    log.error("Managed ZeroOmega launcher tabs:", error),
+  );
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === "managed") {
       if (MANAGED_POLICY_KEYS.some((key) => changes[key])) reconcile();
@@ -363,6 +383,7 @@ globalThis.ZeroOmegaManaged = Object.freeze({
   buildManagedChanges,
   dismissOnboarding,
   parseManagedSettings,
+  reloadLauncherTabs,
   sha256Hex,
   startupProfileFor,
 });
